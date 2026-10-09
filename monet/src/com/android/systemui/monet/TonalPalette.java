@@ -16,8 +16,6 @@
 
 package com.android.systemui.monet;
 
-import com.google.ux.material.libmonet.hct.Hct;
-
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -33,16 +31,11 @@ public class TonalPalette {
     public final Map<Integer, Integer> allShadesMapped;
 
     TonalPalette(com.google.ux.material.libmonet.palettes.TonalPalette materialTonalPalette) {
-        this(materialTonalPalette, 1f, 1f);
+        this(materialTonalPalette, 1f);
     }
 
     TonalPalette(com.google.ux.material.libmonet.palettes.TonalPalette materialTonalPalette,
-            float luminanceFactor, float chromaFactor) {
-        Hct newHct = materialTonalPalette.getKeyColor();
-        newHct.setChroma(newHct.getChroma() * chromaFactor);
-        newHct.setTone(newHct.getTone() * luminanceFactor);
-        materialTonalPalette = com.google.ux.material.libmonet.palettes.TonalPalette.fromHct(newHct);
-
+            float luminanceFactor) {
         this.mMaterialTonalPalette = materialTonalPalette;
         this.allShades = SHADE_KEYS.stream().map(key -> getAtTone(key.floatValue(), luminanceFactor))
                 .collect(Collectors.toList());

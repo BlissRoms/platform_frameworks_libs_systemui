@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -75,8 +76,9 @@ public class ColorScheme {
     public ColorScheme(@ColorInt int seed, boolean isDark, @ThemeStyle.Type int style,
             double contrastLevel, float luminanceFactor, float chromaFactor, boolean wholePalette,
             boolean tintBackground, Integer bgSeed) {
-        this(List.of(seed), isDark, style, contrastLevel, SpecVersion.SPEC_2021, Platform.PHONE,
-                luminanceFactor, chromaFactor, wholePalette, tintBackground, bgSeed);
+        this(List.of(seed), isDark, style, contrastLevel, SpecVersion.SPEC_2026,
+                DynamicScheme.DEFAULT_PLATFORM, luminanceFactor, chromaFactor, wholePalette,
+                tintBackground, bgSeed);
     }
 
     public ColorScheme(@ColorInt int seed, boolean isDark, @ThemeStyle.Type int style,
@@ -127,7 +129,46 @@ public class ColorScheme {
                                 ? GOOGLE_BLUE
                                 : finalBgSeed));
 
-        mMaterialScheme = switch (style) {
+        final DynamicScheme baseScheme = createScheme(seedHcts, isDark, style, contrastLevel,
+                specVersion, platform);
+        final DynamicScheme bgScheme = bgSeedHct.toInt() == seedHcts.getFirst().toInt()
+                ? baseScheme
+                : createScheme(List.of(bgSeedHct), isDark, style, contrastLevel, specVersion,
+                        platform);
+        final boolean tintNeutral2 = tintBackground && wholePalette;
+
+        // Bake chroma and background seed into the palettes so every token (palette shades
+        // and dynamic roles) picks them up regardless of the spec version in use.
+        mMaterialScheme = chromaFactor == 1f && bgScheme == baseScheme ? baseScheme
+                : new DynamicScheme(
+                baseScheme.sourceColorHctList,
+                baseScheme.variant,
+                baseScheme.isDark,
+                baseScheme.contrastLevel,
+                baseScheme.platform,
+                baseScheme.specVersion,
+                scaleChroma(baseScheme.primaryPalette, chromaFactor),
+                scaleChroma(baseScheme.secondaryPalette, wholePalette ? chromaFactor : 1f),
+                scaleChroma(baseScheme.tertiaryPalette, chromaFactor),
+                scaleChroma(bgScheme.neutralPalette, tintBackground ? chromaFactor : 1f),
+                scaleChroma(bgScheme.neutralVariantPalette, tintNeutral2 ? chromaFactor : 1f),
+                Optional.of(scaleChroma(baseScheme.errorPalette, chromaFactor)));
+
+        mAccent1 = new TonalPalette(mMaterialScheme.primaryPalette, luminanceFactor);
+        mAccent2 = new TonalPalette(mMaterialScheme.secondaryPalette,
+                wholePalette ? luminanceFactor : 1f);
+        mAccent3 = new TonalPalette(mMaterialScheme.tertiaryPalette, luminanceFactor);
+        mNeutral1 = new TonalPalette(mMaterialScheme.neutralPalette,
+                tintBackground ? luminanceFactor : 1f);
+        mNeutral2 = new TonalPalette(mMaterialScheme.neutralVariantPalette,
+                tintNeutral2 ? luminanceFactor : 1f);
+        mError = new TonalPalette(mMaterialScheme.errorPalette, luminanceFactor);
+    }
+
+    private static DynamicScheme createScheme(List<Hct> seedHcts, boolean isDark,
+            @ThemeStyle.Type int style, double contrastLevel, SpecVersion specVersion,
+            Platform platform) {
+        return switch (style) {
             case ThemeStyle.SPRITZ -> new SchemeNeutral(seedHcts, isDark, contrastLevel,
                     specVersion,
                     platform);
@@ -155,34 +196,13 @@ public class ColorScheme {
                     contrastLevel);
             default -> throw new IllegalArgumentException("Unknown style: " + style);
         };
+    }
 
-        final DynamicScheme bgScheme = switch (style) {
-            case ThemeStyle.SPRITZ -> new SchemeNeutral(bgSeedHct, isDark, contrastLevel);
-            case ThemeStyle.TONAL_SPOT -> new SchemeTonalSpot(bgSeedHct, isDark, contrastLevel);
-            case ThemeStyle.VIBRANT -> new SchemeVibrant(bgSeedHct, isDark, contrastLevel);
-            case ThemeStyle.EXPRESSIVE -> new SchemeExpressive(bgSeedHct, isDark, contrastLevel);
-            case ThemeStyle.RAINBOW -> new SchemeRainbow(bgSeedHct, isDark, contrastLevel);
-            case ThemeStyle.FRUIT_SALAD -> new SchemeFruitSalad(bgSeedHct, isDark, contrastLevel);
-            case ThemeStyle.CONTENT -> new SchemeContent(bgSeedHct, isDark, contrastLevel);
-            case ThemeStyle.MONOCHROMATIC -> new SchemeMonochrome(bgSeedHct, isDark, contrastLevel);
-            // SystemUI Schemes
-            case ThemeStyle.CLOCK -> new SchemeClock(bgSeedHct, isDark, contrastLevel);
-            case ThemeStyle.CLOCK_VIBRANT -> new SchemeClockVibrant(bgSeedHct, isDark, contrastLevel);
-            default -> throw new IllegalArgumentException("Unknown style: " + style);
-        };
-
-        mAccent1 = new TonalPalette(mMaterialScheme.primaryPalette, luminanceFactor, chromaFactor);
-        mAccent2 = new TonalPalette(mMaterialScheme.secondaryPalette,
-                wholePalette ? luminanceFactor : 1f,
-                wholePalette ? chromaFactor : 1f);
-        mAccent3 = new TonalPalette(mMaterialScheme.tertiaryPalette, luminanceFactor, chromaFactor);
-        mNeutral1 = new TonalPalette(bgScheme.neutralPalette,
-                tintBackground ? luminanceFactor : 1f,
-                tintBackground ? chromaFactor : 1f);
-        mNeutral2 = new TonalPalette(bgScheme.neutralVariantPalette,
-                tintBackground && wholePalette ? luminanceFactor : 1f,
-                tintBackground && wholePalette ? chromaFactor : 1f);
-        mError = new TonalPalette(mMaterialScheme.errorPalette, luminanceFactor, chromaFactor);
+    private static com.google.ux.material.libmonet.palettes.TonalPalette scaleChroma(
+            com.google.ux.material.libmonet.palettes.TonalPalette palette, float chromaFactor) {
+        if (chromaFactor == 1f) return palette;
+        return com.google.ux.material.libmonet.palettes.TonalPalette.fromHueAndChroma(
+                palette.getHue(), Math.max(0d, palette.getChroma() * chromaFactor));
     }
 
     public ColorScheme(@ColorInt int seed, boolean isDark, @ThemeStyle.Type int style,
